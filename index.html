@@ -10,10 +10,30 @@
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#070a0d;font-family:Inter,Segoe UI,Arial,sans-serif}
 body{display:grid;place-items:center}
 canvas{display:block;width:min(100vw,1400px);height:auto;aspect-ratio:16/9;background:#6fa54f;box-shadow:0 18px 80px rgba(0,0,0,.72)}
+
+#mobileControls{display:none;position:fixed;inset:0;z-index:20;pointer-events:none;touch-action:none}
+.mobile-btn{position:absolute;width:68px;height:68px;border-radius:50%;border:2px solid rgba(255,255,255,.32);background:rgba(10,15,18,.58);color:#fff;font:900 20px Arial;display:grid;place-items:center;pointer-events:auto;user-select:none;-webkit-user-select:none;touch-action:none;backdrop-filter:blur(3px)}
+.mobile-btn.small{width:58px;height:58px;font-size:15px}
+#joy{left:24px;bottom:24px;width:148px;height:148px;border-radius:50%;border:2px solid rgba(255,255,255,.22);background:rgba(10,15,18,.28);position:absolute;pointer-events:auto;touch-action:none}
+#joyKnob{position:absolute;left:50%;top:50%;width:62px;height:62px;margin:-31px;border-radius:50%;background:rgba(255,255,255,.28);border:2px solid rgba(255,255,255,.35);pointer-events:none}
+#mbAttack{right:26px;bottom:34px}#mbQ{right:104px;bottom:112px}#mbDash{right:28px;bottom:118px}
+#mbInteract{right:182px;bottom:34px}#mbPause{right:24px;top:24px}
+#mbStart{left:50%;top:62%;transform:translate(-50%,-50%);width:180px;height:62px;border-radius:16px;background:rgba(20,28,32,.85);font-size:22px}
+@media (max-width:900px),(pointer:coarse){body{background:#050709}canvas{width:100vw;height:auto;max-height:100vh;box-shadow:none}#mobileControls{display:block}}
+@media (orientation:portrait) and (max-width:900px){#mobileControls:after{content:'Gira el celular horizontalmente para jugar mejor';position:absolute;top:12px;left:50%;transform:translateX(-50%);padding:7px 12px;border-radius:10px;background:rgba(0,0,0,.65);color:#fff;font:700 12px Arial;white-space:nowrap;pointer-events:none}}
 </style>
 </head>
 <body>
 <canvas id="game" width="1400" height="788"></canvas>
+<div id="mobileControls" aria-hidden="true">
+  <div id="joy"><div id="joyKnob"></div></div>
+  <div class="mobile-btn" id="mbAttack">⚔</div>
+  <div class="mobile-btn" id="mbQ">Q</div>
+  <div class="mobile-btn" id="mbDash">↯</div>
+  <div class="mobile-btn" id="mbInteract">E</div>
+  <div class="mobile-btn small" id="mbPause">Ⅱ</div>
+  <div class="mobile-btn" id="mbStart">JUGAR</div>
+</div>
 <script>
 'use strict';
 
@@ -61,6 +81,37 @@ addEventListener('keydown',e=>{
 });
 addEventListener('keyup',e=>{ keys[keyName(e)]=false; });
 addEventListener('blur',()=>{ for(const k in keys) keys[k]=false; for(const k in pressed) delete pressed[k]; });
+
+
+/* ============================== MOBILE CONTROLS ============================== */
+const mobilePointers=new Map();
+function setVirtualKey(k,on){
+  if(on){if(!keys[k])pressed[k]=true;keys[k]=true;}
+  else keys[k]=false;
+}
+function bindMobileAction(id,key){
+  const el=document.getElementById(id); if(!el)return;
+  const down=e=>{e.preventDefault();ensureAudio();mobilePointers.set(e.pointerId,key);setVirtualKey(key,true);el.setPointerCapture?.(e.pointerId);};
+  const up=e=>{e.preventDefault();if(mobilePointers.get(e.pointerId)===key){mobilePointers.delete(e.pointerId);setVirtualKey(key,false);}};
+  el.addEventListener('pointerdown',down);el.addEventListener('pointerup',up);el.addEventListener('pointercancel',up);el.addEventListener('pointerleave',e=>{if(e.buttons===0)up(e);});
+}
+bindMobileAction('mbAttack','space');bindMobileAction('mbQ','q');bindMobileAction('mbDash','shift');bindMobileAction('mbInteract','e');bindMobileAction('mbPause','p');bindMobileAction('mbStart','enter');
+const joy=document.getElementById('joy'),joyKnob=document.getElementById('joyKnob');
+let joyPointer=null;
+function updateJoystick(e){
+  const r=joy.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;
+  let dx=e.clientX-cx,dy=e.clientY-cy;const max=r.width*.34;const d=Math.hypot(dx,dy);
+  if(d>max){dx=dx/d*max;dy=dy/d*max;}
+  joyKnob.style.transform=`translate(${dx}px,${dy}px)`;
+  const dead=12;
+  setVirtualKey('a',dx<-dead);setVirtualKey('d',dx>dead);setVirtualKey('w',dy<-dead);setVirtualKey('s',dy>dead);
+  if(Math.abs(dx)>dead||Math.abs(dy)>dead){const n=norm(dx,dy);player.facingX=n.x;player.facingY=n.y;}
+}
+joy.addEventListener('pointerdown',e=>{e.preventDefault();ensureAudio();joyPointer=e.pointerId;joy.setPointerCapture?.(e.pointerId);updateJoystick(e);});
+joy.addEventListener('pointermove',e=>{if(e.pointerId===joyPointer){e.preventDefault();updateJoystick(e);}});
+function releaseJoy(e){if(e.pointerId!==joyPointer)return;joyPointer=null;joyKnob.style.transform='translate(0,0)';['a','d','w','s'].forEach(k=>setVirtualKey(k,false));}
+joy.addEventListener('pointerup',releaseJoy);joy.addEventListener('pointercancel',releaseJoy);
+addEventListener('contextmenu',e=>{if(e.target.closest('#mobileControls'))e.preventDefault();});
 
 function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
 function lerp(a,b,t){return a+(b-a)*t;}
@@ -228,6 +279,45 @@ const player={
 };
 
 const coins=[];
+const heals=[];
+function findOpenHealSpot(sx,sy,r=16){
+  const valid=(x,y)=>{
+    if(x-r<20||y-r<20||x+r>WORLD.w-20||y+r>WORLD.h-20)return false;
+    if(buildings.some(b=>rectCircle(x,y,r+8,b)))return false;
+    if(rectCircle(x,y,r+12,supermarket))return false;
+    if(trees.some(t=>Math.hypot(x-t.x,y-t.y)<r+t.r+8))return false;
+    if(coins.some(c=>!c.collected&&Math.hypot(x-c.x,y-c.y)<r+c.r+30))return false;
+    if(heals.some(h=>Math.hypot(x-h.x,y-h.y)<r+h.r+34))return false;
+    return true;
+  };
+  if(valid(sx,sy))return {x:sx,y:sy};
+  for(let radius=35;radius<=420;radius+=35){
+    for(let step=0;step<24;step++){
+      const a=(step/24)*TAU;
+      const x=clamp(sx+Math.cos(a)*radius,20+r,WORLD.w-20-r);
+      const y=clamp(sy+Math.sin(a)*radius,20+r,WORLD.h-20-r);
+      if(valid(x,y))return {x,y};
+    }
+  }
+  for(let y=80;y<WORLD.h-80;y+=80){
+    for(let x=80;x<WORLD.w-80;x+=80){
+      if(valid(x,y))return {x,y};
+    }
+  }
+  return {x:Math.max(r+25,80),y:Math.max(r+25,80)};
+}
+function placeHeals(){
+  heals.length=0;
+  const pts=[
+    [430,820],[1320,700],[2250,900],[3260,690],[4140,900],
+    [720,1740],[1770,1510],[2510,1830],[3430,1660],[4300,1960],
+    [1110,2510],[2050,2670],[3070,2500],[3980,2700]
+  ];
+  pts.forEach((p,i)=>{
+    const pos=findOpenHealSpot(p[0],p[1],16);
+    heals.push({x:pos.x,y:pos.y,r:16,pulse:i*.7,collected:false,amount:25});
+  });
+}
 function findOpenCoinSpot(sx,sy,r=13){
   // Never place a coin inside a building, the supermarket, a tree, or outside the map.
   // Try the requested location first, then search outward in a deterministic spiral.
@@ -274,6 +364,7 @@ function placeCoins(){
   });
 }
 placeCoins();
+placeHeals();
 
 const npcs=[];
 function spawnNPCs(){
@@ -466,6 +557,19 @@ function updateCoins(){
     if(c.collected)continue;c.spin+=.12;
     if(Math.hypot(player.x-c.x,player.y-c.y)<player.r+c.r+6){c.collected=true;player.coins++;player.score+=30;burst(c.x,c.y,'#ffd83d',18,170);sfx('coin');setToast('Moneda encontrada: '+player.coins+'/5',1.4);}
   }
+  for(const h of heals){
+    if(h.collected)continue;
+    h.pulse+=.08;
+    if(Math.hypot(player.x-h.x,player.y-h.y)<player.r+h.r+7){
+      if(player.hp>=player.maxHp)continue;
+      h.collected=true;
+      const recovered=Math.min(h.amount,player.maxHp-player.hp);
+      player.hp+=recovered;
+      burst(h.x,h.y,'#ff5b67',22,190);
+      sfx('power');
+      setToast('Curación +'+Math.round(recovered)+' HP',1.2);
+    }
+  }
 }
 
 function updateExploration(){
@@ -602,7 +706,7 @@ function saveBest(){
 }
 function bestScore(){try{return Number(localStorage.getItem('duckBest')||0);}catch(_){return 0;}}
 function resetGame(){
-  state='menu';paused=false;elapsed=0;shake=0;missionXP=0;player.x=500;player.y=1540;player.hp=player.maxHp;player.energy=100;player.coins=0;player.kills=0;player.rescued=0;player.explored=new Set();player.attack=0;player.attackCd=0;player.powerCd=0;player.dashCd=0;player.hurt=0;player.invuln=0;player.flash=0;player.score=0;player.bossDamage=0;placeCoins();spawnNPCs();spawnEnemies();particles.length=0;projectiles.length=0;bossLasers.length=0;bossShocks.length=0;boss.reset();missions.forEach(m=>m.done=false);setToast('',0);
+  state='menu';paused=false;elapsed=0;shake=0;missionXP=0;player.x=500;player.y=1540;player.hp=player.maxHp;player.energy=100;player.coins=0;player.kills=0;player.rescued=0;player.explored=new Set();player.attack=0;player.attackCd=0;player.powerCd=0;player.dashCd=0;player.hurt=0;player.invuln=0;player.flash=0;player.score=0;player.bossDamage=0;placeCoins();placeHeals();spawnNPCs();spawnEnemies();particles.length=0;projectiles.length=0;bossLasers.length=0;bossShocks.length=0;boss.reset();missions.forEach(m=>m.done=false);setToast('',0);
 }
 function startGame(){
   ensureAudio();if(audioCtx?.state==='suspended')audioCtx.resume();state='world';paused=false;setToast('Consigue 5 monedas. Pulsa E en la entrada del supermercado.',3);beep(330,.08,'triangle',.02);
@@ -665,6 +769,17 @@ function drawSupermarket(){
 }
 function drawCoin(c){
   if(c.collected)return;const s=.5+.5*Math.abs(Math.sin(c.spin));drawShadow(c.x,c.y+12,15,5,.22);ctx.save();ctx.translate(c.x,c.y);ctx.scale(s,1);const g=ctx.createLinearGradient(0,-14,0,14);g.addColorStop(0,'#fff07a');g.addColorStop(.35,'#f5c62f');g.addColorStop(1,'#a36f00');ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,14,0,TAU);ctx.fill();ctx.strokeStyle='#fff4a3';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='#8e6200';ctx.font='bold 13px Arial';ctx.textAlign='center';ctx.fillText('$',0,5);ctx.restore();}
+function drawHeal(h){
+  if(h.collected)return;
+  const pulse=1+Math.sin(h.pulse)*.08;
+  drawShadow(h.x,h.y+15,18,6,.24);
+  ctx.save();ctx.translate(h.x,h.y);ctx.scale(pulse,pulse);
+  ctx.globalAlpha=.25+.12*(Math.sin(h.pulse)+1);ctx.fillStyle='#ff5260';ctx.beginPath();ctx.arc(0,0,24,0,TAU);ctx.fill();
+  ctx.globalAlpha=1;ctx.fillStyle='#f4f4f0';ctx.fillRect(-15,-15,30,30);
+  ctx.fillStyle='#d93646';ctx.fillRect(-5,-11,10,22);ctx.fillRect(-11,-5,22,10);
+  ctx.strokeStyle='#ffffff';ctx.lineWidth=2;ctx.strokeRect(-15,-15,30,30);
+  ctx.restore();
+}
 
 function drawDuck(o){
   const bob=Math.sin(o.anim)*3,x=o.x,y=o.y+bob;drawShadow(x,y+28,29,10,.28);ctx.save();ctx.translate(x,y);let fx=o.facingX||1;if(fx<0)ctx.scale(-1,1);if(o.flash>0){ctx.globalAlpha=.6+Math.sin(elapsed*70)*.35;}
@@ -722,6 +837,7 @@ function drawWorld(){
   drawSupermarket();
   trees.forEach(drawTree);
   coins.forEach(drawCoin);
+  heals.forEach(drawHeal);
   // Landmark markers
   landmarks.forEach((l,i)=>{if(player.explored.has(i))return;ctx.save();ctx.globalAlpha=.75;ctx.strokeStyle=l.color;ctx.lineWidth=3;ctx.beginPath();ctx.arc(l.x,l.y,18+Math.sin(elapsed*3+i)*4,0,TAU);ctx.stroke();ctx.restore();});
 }
@@ -742,6 +858,7 @@ function drawMinimap(){
   ctx.fillStyle='#d22e2e';ctx.fillRect(x+supermarket.x*sx,y+supermarket.y*sy,supermarket.w*sx,supermarket.h*sy);
   if(state==='boss'){ctx.strokeStyle='#ff4f4f';ctx.lineWidth=4;ctx.strokeRect(x+bossArena.x*sx,y+bossArena.y*sy,bossArena.w*sx,bossArena.h*sy);}
   coins.forEach(c=>{if(!c.collected){ctx.fillStyle='#ffd33d';ctx.fillRect(x+c.x*sx-1,y+c.y*sy-1,3,3);}});
+  heals.forEach(h=>{if(!h.collected){ctx.fillStyle='#ff5966';ctx.fillRect(x+h.x*sx-1,y+h.y*sy-1,3,3);}});
   npcs.forEach(n=>{if(n.alive){ctx.fillStyle='#5ee8ff';ctx.fillRect(x+n.x*sx-1,y+n.y*sy-1,3,3);}});
   enemies.forEach(e=>{if(e.alive){ctx.fillStyle=e.type==='mutant'?'#5ce6ff':e.type==='thug'?'#ffad68':'#ff5d5d';ctx.fillRect(x+e.x*sx-1,y+e.y*sy-1,3,3);}});
   ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x+player.x*sx,y+player.y*sy,4,0,TAU);ctx.fill();
